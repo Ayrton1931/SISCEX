@@ -1,0 +1,500 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed May 20 15:58:25 2020
+
+@author: Shadow
+"""
+
+import time
+import os
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC # available since 2.26.0
+from selenium.webdriver.common.action_chains import ActionChains
+from bs4 import BeautifulSoup
+import pandas as pd
+import requests
+import urllib
+import re
+import os
+import xlrd
+import numpy as np
+from unicodedata import normalize
+def newMatrix(f,c,n):
+    matriz=[]
+    for i in range(f):
+        a=[n]*c
+        matriz.append(a)
+    return matriz
+
+temp_path = r'C:\Users\hp\Google Drive\MINAGRI-Donwload\SISCEX\temp'        ### Direccion de donde se guardaran los output
+driver_path = r'C:\Users\hp\Google Drive\MINAGRI-Donwload\SIAF\Code\Chromedriver\chromedriver.exe' ### Direccion donde se encuentra el driver.
+Output_path = r"C:\Users\hp\Google Drive\MINAGRI-Donwload\SISCEX\Output"
+
+###
+### Definition of webdriver
+option = webdriver.ChromeOptions() 
+chrome_prefs = {}
+option.experimental_options["prefs"] = chrome_prefs
+chrome_prefs["profile.default_content_settings"] = {"images": 2}
+chrome_prefs["profile.managed_default_content_settings"] = {"images": 2}
+option.add_experimental_option("prefs",  {'download.default_directory' : temp_path,
+                                              "safebrowsing.enabled": "false"} )
+driver = webdriver.Chrome(options=option, executable_path=driver_path)
+
+### definitions of paths
+general_path = "http://sistemas.minagri.gob.pe/siscex" ### Define GEreanl path
+VAR = ['importaciones' , 'exportaciones']
+for i in VAR:
+    url = os.path.join( general_path , 'exportaciones', "rankingIN") ### Particular part.
+    driver.get(url) ### Get inside the
+    years=["2014", "2015", "2016", "2017", "2018"]
+    for jj in years: ### Choose years
+        driver.find_element_by_xpath("//select[@id='anios']/option[@value= '%s' ]" %jj ).click()
+        time.sleep(10)
+        driver.find_element_by_xpath("//select[@id='mesInicio']/option[@value= '01' ]").click()
+        time.sleep(10)
+        driver.find_element_by_xpath("//select[@id='mesFin']/option[@value='12']").click()
+        time.sleep(10)
+        driver.find_element_by_xpath("//input[@type='radio'][@id='arancel'][@name='tipoDeListado']").click()
+        driver.find_element_by_xpath("//input[@type='submit'][@value='Enviar']").click()
+        time.sleep(40)
+        driver.find_element_by_xpath("//input[@type='button'][@id='exportar1'][@value='Exportar']").click()
+        
+
+#########
+######### Importar files
+#########
+
+list_of_names_files = os.listdir(temp_path) ### Obtener los nombres de los archivos de cada carpeta.
+list_of_names_files.remove('desktop.ini') ### Erase that file
+
+List_of_content_files = [] ### Lista vacia donde se guardaran los files
+for ii in list_of_names_files: ### Importar cada file y ponerlo en una lista    
+    if re.search('xls', ii):
+        file_path=os.path.join(temp_path, ii)
+        content_file = pd.read_html(file_path) ### Read the file as html document      
+        List_of_content_files.append(content_file)
+
+
+List_Import=[]
+List_Export=[]
+for i in List_of_content_files:
+    df=i[0]
+    first_row = df.iloc[0,]
+    if re.search("IMPORTACIONES", first_row[0]):
+        match = re.search(r'\d\d\d\d', first_row[0])
+        yy = match.group()
+        row_rename_values = df.iloc[2,].tolist()
+        row_rename_values = [ 'Ranking Import %s' %yy ] + row_rename_values[1:len(row_rename_values)]
+        df.columns=row_rename_values
+        df=df.iloc[ 4: df.shape[0], 0:df.shape[1] ]
+        List_Import.append(df)
+    else:
+        match = re.search(r'\d\d\d\d', first_row[0])
+        yy = match.group()
+        row_rename_values = df.iloc[2,].tolist()
+        row_rename_values = [ 'Ranking Export %s' %yy ] + row_rename_values[1:len(row_rename_values)]
+        df.columns=row_rename_values
+        df=df.iloc[ 4: df.shape[0], 0:df.shape[1] ]
+        List_Export.append(df)        
+        
+##########
+########## Get commerce balances:
+##########        
+List_Int_comm = [ List_Import, List_Export ] ### A list that contain both list(imports and exports)
+List_Int_comm_fil =[]
+for i in List_Int_comm: ## Get inside the  supra-list 
+    for jj in i: ## Get inside each list to get df's
+        col_names = jj.columns.values ## Get columns names
+        col_names = col_names.tolist()
+        a=[]
+        for kk in col_names:
+            if re.search( "Valor", kk ): ### Detect the names of interest
+                if len(a)==0:
+                    a = [col_names.index(kk)]
+                else:
+                    a = a + [col_names.index(kk)]
+        col_1 = col_names[0]
+        col_2 = col_names[1]
+        col_n = col_names[2]
+        col_3 = col_names[a[0]]
+        if len(a)>1:
+            col_4 = col_names[a[1]]
+            df = jj[ [col_1, col_2, col_n, col_3, col_4  ] ]
+        else:
+            df = jj[ [col_1, col_2, col_n, col_3] ]
+        if re.search( "Import", col_names[0] ): ## Rename selected variables, add an id
+           column_sub_values = df.columns.values 
+           column_sub_values = column_sub_values.tolist() 
+           change_names =[]
+           for ss in column_sub_values[2:len(column_sub_values)] :
+               jhx = ss + ' Import'
+               change_names.append(jhx)
+           new_names = column_sub_values[0:2] + change_names
+           df.columns = new_names
+        else:
+           column_sub_values = df.columns.values 
+           column_sub_values = column_sub_values.tolist() 
+           change_names =[]
+           for ss in column_sub_values[2:len(column_sub_values)] :
+               jhx = ss + ' Export'
+               change_names.append(jhx)
+           new_names = column_sub_values[0:2] + change_names
+           df.columns = new_names
+        List_Int_comm_fil.append(df) 
+######    
+###### Merge the df's
+######        
+years=["2014", "2015", "2016", "2017", "2018"]
+### Select the data frames of each year:
+Compare_info=[]
+for i in range(0, len(List_Int_comm_fil)):
+    df = List_Int_comm_fil[i]
+    columns_names = df.columns.values
+    par = [columns_names[0], i]
+    Compare_info.append(par)
+a=[]
+for jj in years:
+    ax=[]
+    for ii in Compare_info:
+        if re.search( jj , ii[0]):
+            ax.append(ii[1])
+    a.append(ax)
+List_merge_comm=[] #### Empty list for merged dataframes
+for i in a:        #### 
+    df = pd.merge(left=List_Int_comm_fil[i[0]] , right=List_Int_comm_fil[i[1]] , how='outer' ,left_on='Subpartida Nacional', right_on='Subpartida Nacional')
+    columns_df = df.columns.values
+    columns_df = columns_df.tolist()
+    col = []
+    for i in columns_df:
+        if re.search('FOB', i):
+            col.append(i)
+    Balance_Trade = df[ col[0] ].apply(float) - df[ col[1] ].apply(float)
+    df['Balance Trade'] = Balance_Trade
+    def func1(x1, y, z):
+        y1 = float(y)
+        z1 = float(z)
+        if np.isnan(x1) & np.isnan(y1):
+            exprt= - float(z1)
+            return(exprt)
+        elif np.isnan(x1) & np.isnan(z1):
+            imprt = float(y1)
+            return(imprt)
+        else:
+            return(x1)
+    df['Balance Trade'] = df.apply(lambda x: func1(x['Balance Trade'], x['Valor FOB (Miles US$) Import'], x['Valor FOB (Miles US$) Export']  ), axis=1 )
+    List_merge_comm.append(df)
+
+##### There are products that are'nt match, this condition does'nt mean. Get those products.
+
+### First: take both "subpartida nacional"     
+    
+
+#################
+################# Get "subpartida nacional" 
+#################
+option = webdriver.ChromeOptions() 
+chrome_prefs = {}
+option.experimental_options["prefs"] = chrome_prefs
+chrome_prefs["profile.default_content_settings"] = {"images": 2}
+chrome_prefs["profile.managed_default_content_settings"] = {"images": 2}
+option.add_experimental_option("prefs",  {'download.default_directory' : temp_path,
+                                              "safebrowsing.enabled": "false"} )
+driver = webdriver.Chrome(options=option, executable_path=driver_path)    
+sub_partida_url = r"http://www.aduanet.gob.pe/itarancel/arancelS01Alias?accion=buscarPartida&esframe=1"            
+driver.get(sub_partida_url)
+content = driver.page_source
+soup =  BeautifulSoup(content)
+Tabla = soup.find_all('table', {'border':'1'} ) 
+rows = Tabla[0].find_all('tr')
+
+MM = newMatrix(len(rows),3,'NaN')
+for i in range(1, len(rows) ):
+    value_row = rows[i]
+    value_esp = value_row.find_all('font')
+    value_esp = value_row.find_all('font')
+    text_code = value_esp[0].get_text()
+    text_name = value_esp[1].get_text()
+    code_selection = text_code.split('.')
+    code_selection = code_selection[0]
+    text_code = text_code.replace('.','')
+    text_name = text_name.replace('\n','')        
+    text_name = text_name.replace('\t', '')
+    text_name = text_name.lower() 
+    text_name = re.sub(
+                        r"([^n\u0300-\u036f]|n(?!\u0303(?![\u0300-\u036f])))[\u0300-\u036f]+", r"\1", 
+                normalize( "NFD", text_name), 0, re.I
+            )
+    text_name = normalize("NFC", text_name)
+    MM[i][0] = text_name
+    MM[i][1] = text_code
+    MM[i][2] = int(code_selection[0:2])
+sub_partida = pd.DataFrame(data=MM)
+sub_partida = sub_partida.iloc[ 1:sub_partida.shape[0], 0:sub_partida.shape[1] ]
+#sub_partida_agrop = sub_partida[sub_partida[2]<=14].reset_index()
+#del sub_partida_agrop['index']
+
+
+########
+######## TAke names of VBP_excel 
+########
+names_products_path = r'C:\Users\hp\Google Drive\MINAGRI-Donwload\SEIA\Output'
+files_names_path = os.path.join(names_products_path, r'VBP_AgroPec.csv')
+files_names_content = pd.read_csv(files_names_path, encoding='latin-1')
+vector_names = files_names_content['Producto']
+vector_names = vector_names.apply(lambda x: 'maiz amarillo duro' if x=='maiz a. duro' else x)
+vector_names = vector_names.apply(lambda x: 'papas' if x=='papa' else x)
+vector_names = vector_names.apply(lambda x: 'aves' if x=='ave' else x)
+
+
+#List_match=[]
+#sub_partidas_names = sub_partida_agrop[0] 
+#MM = newMatrix( len(sub_partidas_names), 1, 'nan' )
+#for jj in range(0, len(sub_partidas_names)):
+#    values_name= sub_partidas_names[jj]
+#    for i in vector_names:
+#        if re.search(i, values_name):
+#            MM[jj][0]=i
+#sub_partida_agrop_sub = pd.concat(  [sub_partida_agrop, pd.DataFrame(data=MM)], axis=1  )      
+#sub_partida_agrop_sub.columns=['Descripcion', 'Subpartida Nacional', 'Capitulo', 'Producto']
+#sub_partida_agrop_sub[sub_partida_agrop_sub['Producto']!='nan']            
+            
+#####
+##### Take names from other path:
+partidas_names_path = os.path.join(temp_path, r'Cap01-98-Descripcion\nombres_partidas.xlsx' )
+xls_file_wbook = xlrd.open_workbook( partidas_names_path, on_demand=True)   ### Cargar el workbokk del archivo xslx
+xls_sheet = xls_file_wbook.sheet_names()
+content_names_partidas = pd.read_excel( partidas_names_path ,sheet_name= 'Nombre' )
+content_names_partidas = content_names_partidas.dropna()
+content_names_partidas = content_names_partidas.reset_index()
+def func2(xxx):
+    xxx=xxx.lower() 
+    xxx = re.sub(
+                        r"([^n\u0300-\u036f]|n(?!\u0303(?![\u0300-\u036f])))[\u0300-\u036f]+", r"\1", 
+                normalize( "NFD", xxx), 0, re.I
+            )
+    xxx = normalize("NFC", xxx)
+    r_xx = xxx
+    return(r_xx)
+content_names_partidas['Producto']=content_names_partidas.apply( lambda x: func2(x['Producto']),axis=1 )
+content_names_partidas['subpartida Nacional']=content_names_partidas['subpartida Nacional'].apply( lambda x: str(x).replace('.','') )
+sub_partidas_names = content_names_partidas['Producto']
+MM = newMatrix( len(sub_partidas_names), 1, 'nan' )
+for jj in range(0, len(sub_partidas_names)):
+    values_name= ' ' + sub_partidas_names[jj]
+    for i in vector_names:
+        ii = ' '+ i
+        if re.search(ii, values_name):
+            MM[jj][0]=i
+
+sub_partida_agrop_sub = pd.concat(  [content_names_partidas, pd.DataFrame(data=MM)], axis=1  )      
+del sub_partida_agrop_sub['index']
+camparation = pd.merge(left=sub_partida_agrop_sub , right=sub_partida , how='inner' ,left_on='subpartida Nacional', right_on=1)    
+camparation=camparation[camparation['0_x']!='nan']
+
+
+df.columns.values
+####
+#### Unir
+Balance_Trade=[]
+for i in range(0,len(List_merge_comm) ):
+    df = List_merge_comm[i]
+    df = pd.merge(left=df , right=camparation , how='inner' ,left_on='Subpartida Nacional', right_on='subpartida Nacional')    
+    df['Valor FOB (Miles US$) Import']= df['Valor FOB (Miles US$) Import'].apply(float)
+    df['Valor FOB (Miles US$) Export']= df['Valor FOB (Miles US$) Export'].apply(float)
+    M_df = df.groupby('0_x')['Valor FOB (Miles US$) Import'].sum()
+    X_df = df.groupby('0_x')['Valor FOB (Miles US$) Export'].sum()
+    Balance_Trade_df = df.groupby('0_x')['Balance Trade'].sum()
+    M_df = pd.DataFrame(data=M_df)
+    X_df = pd.DataFrame(data=X_df)
+    Balance_Trade_df = pd.DataFrame(data=Balance_Trade_df)
+    col_name= 2014 + i
+    col_name0 = ['Balance Trade' + ' ' + str(col_name) ]
+    Balance_Trade_df.columns = col_name0
+    col_name1 = ['Valor FOB (Miles US$) Import' + ' ' + str(col_name) ]
+    col_name2 = ['Valor FOB (Miles US$) Export' + ' ' + str(col_name) ]
+    M_df.columns = col_name1
+    X_df.columns = col_name2
+    if i==0:
+        Balance_Trade = Balance_Trade_df
+        M_serie = M_df
+        X_serie = X_df
+    else:
+        Balance_Trade= pd.merge(left = Balance_Trade, right= Balance_Trade_df, left_index=True, right_index=True, how='outer' )
+        M_serie = pd.merge(left =M_serie , right=M_df, left_index=True, right_index=True, how='outer' )
+        X_serie = pd.merge(left =X_serie , right=X_df, left_index=True, right_index=True, how='outer' )
+   
+file_output_file=os.path.join(Output_path, r'Export_values.csv')     
+X_serie.to_csv(file_output_file, encoding='latin-1')
+file_output_file=os.path.join(Output_path, r'Import_values.csv')     
+M_serie.to_csv(file_output_file, encoding='latin-1')
+file_output_file=os.path.join(Output_path, r'Balance_Trade.csv')
+Balance_Trade.to_csv(file_output_file, encoding='latin-1')
+file_output_file=os.path.join(Output_path, r'Subpartidas_Selected.csv')
+camparation.to_csv(file_output_file, encoding='latin-1')
+
+path_selected_file = os.path.join(names_products_path, "selected_VBP.csv")
+files_names_content = pd.read_csv(path_selected_file, encoding='latin-1')
+vector_names = files_names_content['Producto']
+vector_names = vector_names.apply(lambda x: 'maiz amarillo duro' if x=='maiz a. duro' else x)
+vector_names = vector_names.apply(lambda x: 'papas' if x=='papa' else x)
+vector_names = vector_names.apply(lambda x: 'aves' if x=='ave' else x)
+vector_names = pd.DataFrame(data=vector_names)
+Selected_Balance_Trade = pd.merge(left = vector_names, right= Balance_Trade, left_on='Producto', right_index=True, how='inner' )
+file_output_file = os.path.join(Output_path, r'Selected_Balance_Trade.csv')
+Selected_Balance_Trade.to_csv(file_output_file, encoding="latin-1")
+
+Selected_M = pd.merge(left = vector_names, right= M_serie, left_on='Producto', right_index=True, how='inner' )
+file_output_file = os.path.join(Output_path, r'Selected_M.csv')
+Selected_M.to_csv(file_output_file, encoding="latin-1")
+Selected_X = pd.merge(left = vector_names, right= X_serie, left_on='Producto', right_index=True, how='inner' )
+file_output_file = os.path.join(Output_path, r'Selected_X.csv')
+Selected_X.to_csv(file_output_file, encoding="latin-1")
+
+
+#####
+##### Estimate the Balance trade by weight. Above line get it by FOB price diferences. Also,  
+#####
+
+### Use
+List_Int_comm_fil =[]
+for i in List_Int_comm: ## Get inside the  supra-list
+    def func3(var_x, var_y):
+        var_y_float = float(var_y)
+        if int(var_y_float)==0:
+            return( str(var_y_float) )
+        else:
+            cociente = float(var_x)*1000/float(var_y)
+            return( str(cociente) )
+    for jj in i: ## Get inside each list to get df's
+        col_names = jj.columns.values ## Get columns names
+        col_names = col_names.tolist()
+        a=[]
+        for kk in col_names:
+            if re.search( "Valor", kk ): ### Detect the names of interest
+                if len(a)==0:
+                    a = [col_names.index(kk)]
+                else:
+                    a = a + [col_names.index(kk)]
+        col_1 = col_names[0]
+        col_2 = col_names[1]
+        col_n = col_names[2]
+        col_n1= col_names[3]
+        col_3 = col_names[a[0]]
+        if len(a)>1:
+            col_4 = col_names[a[1]]
+            df = jj[ [col_1, col_2, col_n, col_n1, col_3, col_4  ] ]
+        else:
+            df = jj[ [col_1, col_2, col_n, col_n1, col_3] ]
+        if re.search( "Import", col_names[0] ): ## Rename selected variables, add an id
+           column_sub_values = df.columns.values 
+           column_sub_values = column_sub_values.tolist() 
+           change_names =[]
+           for ss in column_sub_values[2:len(column_sub_values)] :
+               jhx = ss + ' Import'
+               change_names.append(jhx)
+           new_names = column_sub_values[0:2] + change_names
+           df.columns = new_names
+           df['Precio Ton Import'] = df.apply(lambda x: func3(x['Valor CIF (Miles US$) Import'], x['Peso Neto (t) Import']), axis=1  )
+        else:
+           column_sub_values = df.columns.values 
+           column_sub_values = column_sub_values.tolist() 
+           change_names =[]
+           for ss in column_sub_values[2:len(column_sub_values)] :
+               jhx = ss + ' Export'
+               change_names.append(jhx)
+           new_names = column_sub_values[0:2] + change_names
+           df.columns = new_names
+           df['Precio Ton Export'] = df.apply(lambda x: func3(x['Valor FOB (Miles US$) Export'], x['Peso Neto (t) Export']), axis=1  )
+        List_Int_comm_fil.append(df)
+        
+#######  Merge data frames by years     
+Compare_info=[]
+for i in range(0, len(List_Int_comm_fil)):
+    df = List_Int_comm_fil[i]
+    columns_names = df.columns.values
+    par = [columns_names[0], i]
+    Compare_info.append(par)
+a=[]
+for jj in years:
+    ax=[]
+    for ii in Compare_info:
+        if re.search( jj , ii[0]):
+            ax.append(ii[1])
+    a.append(ax)
+
+List_merge_comm=[] #### Empty list for merged dataframes
+for i in a:        #### 
+    df = pd.merge(left=List_Int_comm_fil[i[0]] , right=List_Int_comm_fil[i[1]] , how='outer' ,left_on='Subpartida Nacional', right_on='Subpartida Nacional')
+    List_merge_comm.append(df)
+    columns_df = df.columns.values
+    columns_df = columns_df.tolist()
+
+####### Separate by weight and price
+List_Peso=[]
+List_Precio=[]    
+for i in range (0,len(List_merge_comm)):
+    df = List_merge_comm[i]
+    col_names = df.columns.values
+    col_names = col_names.tolist()
+    col_new_names = [col_names[0] , col_names[1], col_names[3] , col_names[6] , col_names[9] , col_names[11] ]
+    df = df[col_new_names]
+    #df = df.fillna('0')
+    df = pd.merge(left=camparation, right=df,  how= 'inner', left_on='subpartida Nacional', right_on='Subpartida Nacional'  )
+    df['Peso Neto (t) Import'] = df['Peso Neto (t) Import'].apply(float)
+    df['Peso Neto (t) Export'] = df['Peso Neto (t) Export'].apply(float)
+    df['Precio Ton Import'] = df['Precio Ton Import'].apply(float)
+    df['Precio Ton Export'] = df['Precio Ton Export'].apply(float)    
+    sum_import = pd.DataFrame( data = df.groupby('0_x')['Peso Neto (t) Import'].sum() )
+    sum_export = pd.DataFrame( data = df.groupby('0_x')['Peso Neto (t) Export'].sum() )
+    df1 = pd.merge( left= sum_import, right=sum_export, left_index=True, right_index=True, how='outer' )  
+    col_df1_names = df1.columns.values
+    col_df1_names = col_df1_names.tolist()
+    for jj in range(0, len(col_df1_names)):
+        col_df1_names[jj] = col_df1_names[jj] + ' ' + str( 2014 + i )
+    df1.columns = col_df1_names
+    
+    mean_p_import = pd.DataFrame( data = df.groupby('0_x')['Precio Ton Import'].mean() )
+    sd_p_import = pd.DataFrame( data = df.groupby('0_x')['Precio Ton Import'].std() )
+    sd_p_import.columns = ['Precio Ton Import sd']
+    mean_p_export = pd.DataFrame( data = df.groupby('0_x')['Precio Ton Export'].mean() )
+    sd_p_export = pd.DataFrame( data = df.groupby('0_x')['Precio Ton Export'].std() )
+    sd_p_export.columns = ['Precio Ton Export sd']
+    df21 = pd.merge( left= mean_p_import, right=sd_p_import, left_index=True, right_index=True, how='outer' )
+    df22 = pd.merge( left= mean_p_export, right=sd_p_export, left_index=True, right_index=True, how='outer' )
+    df2 = pd.merge( left= df21, right=df22, left_index=True, right_index=True, how='outer' )
+    col_df2_names = df2.columns.values
+    col_df2_names = col_df2_names.tolist()
+    for jj in range(0, len(col_df2_names)):
+        col_df2_names[jj] = col_df2_names[jj] + ' ' + str( 2014 + i )
+    df2.columns = col_df2_names
+    
+    List_Peso.append(df1)
+    List_Precio.append(df2)
+
+List_final_sub =[ List_Peso, List_Precio ]
+List_merge_final_sub=[]
+for j in List_final_sub:     
+    for i in range( 0, len(j) ):
+        if i==0:
+            df = j[i]
+        else:
+            df = pd.merge( left= df, right= j[i], left_index=True, right_index=True, how='inner'  )
+    List_merge_final_sub.append(df)
+
+for i in range(0, len(List_merge_final_sub) ):
+    if i == 0:
+        file_path_final = os.path.join(Output_path, r'Pesos_TB.csv' ) ### Export Each List
+        List_merge_final_sub[i].to_csv( file_path_final, encoding='latin-1' )
+        df = pd.merge( left = vector_names , right=List_merge_final_sub[i], how='inner', left_on= 'Producto', right_index=True )
+        file_path_final = os.path.join(Output_path, r'Selectd_Pesos_TB.csv' )
+        df.to_csv( file_path_final, encoding='latin-1' )
+
+    else:
+        file_path_final = os.path.join(Output_path, r'Precios_TB.csv' ) ### Export Each List
+        List_merge_final_sub[i].to_csv( file_path_final, encoding='latin-1' )
+        df = pd.merge( left = vector_names , right=List_merge_final_sub[i], how='inner', left_on= 'Producto', right_index=True )
+        file_path_final = os.path.join(Output_path, r'Selectd_Precios_TB.csv' )
+        df.to_csv( file_path_final, encoding='latin-1' )
